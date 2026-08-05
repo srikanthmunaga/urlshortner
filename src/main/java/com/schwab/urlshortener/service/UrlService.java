@@ -6,13 +6,13 @@ import com.schwab.urlshortener.dto.UrlStatsResponse;
 
 public interface UrlService {
 
-    CreateUrlResponse createShortUrl(CreateUrlRequest request);
+  CreateUrlResponse createShortUrl(CreateUrlRequest request);
 
-    String resolveAndTrack(String shortCode, String ipAddress, String userAgent, String referrer);
+  String resolveAndTrack(String shortCode, String ipAddress, String userAgent, String referrer);
 
-    void recordClick(String shortCode, String ipAddress, String userAgent, String referrer);
+  void recordClick(String shortCode, String ipAddress, String userAgent, String referrer);
 
-    UrlStatsResponse getStats(String shortCode);
+  UrlStatsResponse getStats(String shortCode);
 
-    void deactivate(String shortCode);
+  void deactivate(String shortCode);
 }

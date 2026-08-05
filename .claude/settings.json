@@ -20,9 +20,9 @@
           {
             "type": "command",
             "if": "Bash(git commit *)",
-            "command": "if ! (cd /Users/srikanthmunaga/Downloads/url-shortener && mvn -q -DskipTests compile); then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"mvn compile failed - fix build errors before committing\"}}'; fi",
+            "command": "cd /Users/srikanthmunaga/Downloads/url-shortener && mvn -q spotless:apply && git add -u; if ! (mvn -q -DskipTests compile); then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"mvn compile failed - fix build errors before committing\"}}'; fi",
             "timeout": 60,
-            "statusMessage": "Compiling before commit..."
+            "statusMessage": "Formatting (spotless:apply) and compiling before commit..."
           }
         ]
       },
