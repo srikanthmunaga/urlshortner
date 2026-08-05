@@ -11,6 +11,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -51,6 +52,15 @@ public class GlobalExceptionHandler {
             .findFirst()
             .orElse("Validation failed");
     return build(HttpStatus.BAD_REQUEST, message);
+  }
+
+  @ExceptionHandler(NoResourceFoundException.class)
+  public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException ex) {
+    // Thrown by Spring's own static-resource handler for any GET that doesn't match a
+    // controller mapping - e.g. a bare GET / with no short code. Was previously falling
+    // into handleGeneric() below and returning 500 for what is really just a 404; caught
+    // live on the Render deployment (its own health probe hits / right after boot).
+    return build(HttpStatus.NOT_FOUND, "Not found");
   }
 
   @ExceptionHandler(Exception.class)

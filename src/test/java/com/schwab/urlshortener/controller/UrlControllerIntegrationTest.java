@@ -81,6 +81,15 @@ class UrlControllerIntegrationTest {
   }
 
   @Test
+  void bareRootPath_returns404_notServerError() throws Exception {
+    // GET / matches no controller route and no static resource, so Spring throws
+    // NoResourceFoundException - this must map to 404, not fall into the generic
+    // 500 handler. Caught on a live deployment where the platform's own health
+    // probe hits / right after boot.
+    mockMvc.perform(get("/")).andExpect(status().isNotFound());
+  }
+
+  @Test
   void createUrl_conflictsOnDuplicateCustomAlias() throws Exception {
     Map<String, Object> first =
         Map.of("longUrl", "https://example.com/a", "customAlias", "uniquex1");
