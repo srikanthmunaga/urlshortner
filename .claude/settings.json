@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | { read -r f; case \"$f\" in *.java) (cd /Users/srikanthmunaga/Downloads/url-shortener && mvn -q -DskipITs test) ;; esac; }",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | { read -r f; case \"$f\" in *.java) (mvn -q -DskipITs test) ;; esac; }",
             "timeout": 180,
             "statusMessage": "Running mvn test (Java file changed)..."
           }
@@ -20,7 +20,7 @@
           {
             "type": "command",
             "if": "Bash(git commit *)",
-            "command": "cd /Users/srikanthmunaga/Downloads/url-shortener && mvn -q spotless:apply && git add -u; if ! (mvn -q -DskipTests compile); then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"mvn compile failed - fix build errors before committing\"}}'; fi",
+            "command": "mvn -q spotless:apply && git add -u; if ! (mvn -q -DskipTests compile); then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"mvn compile failed - fix build errors before committing\"}}'; fi",
             "timeout": 60,
             "statusMessage": "Formatting (spotless:apply) and compiling before commit..."
           }
