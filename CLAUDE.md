@@ -5,8 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A URL shortener prototype (Java 17 / Spring Boot 3.3.2) 
-`docs/` contains the
-process artifacts the assignment specifically asks for: `ARCHITECTURE.md`
+`docs/` contains the process artifacts  `ARCHITECTURE.md`
 (components, control flow, key decisions), `SCENARIOS.md` (greenfield /
 brownfield / ambiguous walkthroughs), `TESTING.md` (approach, coverage,
 limitations), `ENGINEERING_SUMMARY.md` (plan, risks, assumptions). Read
