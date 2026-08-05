@@ -61,11 +61,20 @@ body on a hit.
 `longUrlHash` column) and, if no custom alias is requested, looks up an
 existing **active, non-expired** row for that hash before minting a new code.
 Same long URL in → same short code out, without an extra client-side check.
-This is skipped when a custom alias is supplied (line ~60), and it is a
-read-then-write check, not an atomic upsert — `idx_long_url_hash` is a plain
-index, not a unique constraint, so two requests for the same brand-new URL
-landing at the same instant can each create their own row. Known, documented
-gap, not enforced at the DB level.
+This is skipped when a custom alias is supplied. `idx_long_url_hash` is still
+a plain index, not a unique constraint, so nothing at the DB level prevents a
+duplicate — but the create path now serializes per-hash via a lock in
+`createShortUrl`, held across the full transaction (see the class-level
+comments on `createLocks` and the `self`-proxy field in `UrlServiceImpl` for
+why a plain `synchronized` block nested inside `@Transactional` wasn't
+enough). `UrlControllerIntegrationTest.createShortUrl_concurrentRequestsForSameUrl_produceOnlyOneShortCode`
+fires 12 concurrent requests for the same URL and asserts exactly one
+`shortCode` comes back — this is a regression test, not just a design claim.
+Single-instance only, same disclosed scope as `RateLimiterService` and the
+cache: a multi-instance deployment would need this to move to a DB-level
+constraint or a shared lock. `findFirstByLongUrlHashAndActiveTrueOrderByCreatedAtAsc`
+(not a plain unique-result query) is deliberate defense in depth so that even
+if a duplicate ever exists, lookups don't throw `NonUniqueResultException`.
 
 ### Validation matches what the redirect path actually does
 
@@ -84,10 +93,10 @@ redirect-side `URI.create()` call, keep them in sync or reintroduce this bug.
 `GlobalExceptionHandler` (`@RestControllerAdvice`) maps domain exceptions to
 status codes: `UrlNotFoundException`→404, `UrlExpiredException`→410,
 `AliasAlreadyExistsException`→409, `RateLimitExceededException`→429,
-`MethodArgumentNotValidException`→400. The catch-all `handleGeneric()`
-handler logs via `log.error()` before returning a generic 500 — this logging
-was added deliberately; without it, any exception not matched by a specific
-handler (e.g. `HttpMessageNotReadableException` from malformed JSON) is
+`MethodArgumentNotValidException`→400, `HttpMessageNotReadableException`
+(malformed JSON body)→400. The catch-all `handleGeneric()` handler logs via
+`log.error()` before returning a generic 500 for anything else — this
+logging was added deliberately; without it, an unmatched exception is
 silently swallowed with no trace of the real cause anywhere.
 
 ### Other structural points worth knowing before editing
