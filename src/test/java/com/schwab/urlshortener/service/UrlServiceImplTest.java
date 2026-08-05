@@ -35,11 +35,15 @@ class UrlServiceImplTest {
     MockitoAnnotations.openMocks(this);
     service =
         new UrlServiceImpl(shortUrlRepository, clickEventRepository, "http://localhost:8080", 7);
+    // @Autowired never runs here since this is constructed with `new`, not by Spring -
+    // self-inject manually so createShortUrl()'s call to self.createOrReuseTransactional()
+    // doesn't NPE. No real transactional proxy in play in a plain unit test either way.
+    service.self = service;
   }
 
   @Test
   void createShortUrl_generatesCodeAndSaves_whenNoDuplicate() {
-    when(shortUrlRepository.findByLongUrlHashAndActiveTrue(anyString()))
+    when(shortUrlRepository.findFirstByLongUrlHashAndActiveTrueOrderByCreatedAtAsc(anyString()))
         .thenReturn(Optional.empty());
     when(shortUrlRepository.existsByShortCode(anyString())).thenReturn(false);
 
@@ -60,7 +64,7 @@ class UrlServiceImplTest {
     existing.setLongUrl("https://example.com/dup");
     existing.setCreatedAt(Instant.now());
 
-    when(shortUrlRepository.findByLongUrlHashAndActiveTrue(anyString()))
+    when(shortUrlRepository.findFirstByLongUrlHashAndActiveTrueOrderByCreatedAtAsc(anyString()))
         .thenReturn(Optional.of(existing));
 
     CreateUrlRequest request = new CreateUrlRequest();

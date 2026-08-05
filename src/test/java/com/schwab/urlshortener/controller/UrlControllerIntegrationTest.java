@@ -4,7 +4,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -93,5 +99,74 @@ class UrlControllerIntegrationTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(second)))
         .andExpect(status().isConflict());
+  }
+
+  @Test
+  void createUrl_rejectsUriWithIllegalCharacters() throws Exception {
+    // Passes the http(s):// prefix @Pattern check but is not a well-formed URI -
+    // this is the exact string that previously slipped through validation, got
+    // saved, and crashed the redirect endpoint with an unhandled 500.
+    Map<String, Object> body = Map.of("longUrl", "https://9gV#k\\|a/N>K-u,<9g:>");
+
+    mockMvc
+        .perform(
+            post("/api/urls")
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(body)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("valid URI")));
+  }
+
+  @Test
+  void createUrl_rejectsMalformedJsonBody() throws Exception {
+    // Deliberately broken JSON (unterminated string) - previously fell through to
+    // the generic Exception handler and returned an unhelpful 500.
+    String malformedJson = "{\"longUrl\": \"https://example.com/x }";
+
+    mockMvc
+        .perform(post("/api/urls").contentType("application/json").content(malformedJson))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void createShortUrl_concurrentRequestsForSameUrl_produceOnlyOneShortCode() throws Exception {
+    String longUrl = "https://example.com/race-condition-check";
+    Map<String, Object> body = Map.of("longUrl", longUrl);
+    String json = objectMapper.writeValueAsString(body);
+    int threadCount = 12;
+
+    ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+    try {
+      Callable<String> createCall =
+          () -> {
+            String response =
+                mockMvc
+                    .perform(post("/api/urls").contentType("application/json").content(json))
+                    .andExpect(status().isCreated())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+            return objectMapper.readTree(response).get("shortCode").asText();
+          };
+
+      List<Future<String>> futures =
+          java.util.stream.Stream.generate(() -> pool.submit(createCall))
+              .limit(threadCount)
+              .collect(Collectors.toList());
+
+      List<String> shortCodes = new java.util.ArrayList<>();
+      for (Future<String> f : futures) {
+        shortCodes.add(f.get());
+      }
+
+      long distinctCodes = shortCodes.stream().distinct().count();
+      org.assertj.core.api.Assertions.assertThat(distinctCodes)
+          .as(
+              "all %d concurrent requests for the same URL should return the same shortCode",
+              threadCount)
+          .isEqualTo(1);
+    } finally {
+      pool.shutdown();
+    }
   }
 }

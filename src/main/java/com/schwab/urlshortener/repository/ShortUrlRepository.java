@@ -13,7 +13,13 @@ public interface ShortUrlRepository extends JpaRepository<ShortUrl, Long> {
 
   Optional<ShortUrl> findByShortCode(String shortCode);
 
-  Optional<ShortUrl> findByLongUrlHashAndActiveTrue(String longUrlHash);
+  // findFirst...OrderBy... (LIMIT 1) rather than a plain unique-result query: the
+  // hash column has no DB-level unique constraint (see ShortUrl.longUrlHash), so
+  // if more than one active row ever exists for the same hash - a leftover race,
+  // or data from before the application-level lock in UrlServiceImpl existed -
+  // this must not throw NonUniqueResultException on every subsequent request for
+  // that URL. Oldest row wins, consistent with "first one created is canonical."
+  Optional<ShortUrl> findFirstByLongUrlHashAndActiveTrueOrderByCreatedAtAsc(String longUrlHash);
 
   boolean existsByShortCode(String shortCode);
 

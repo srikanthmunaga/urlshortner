@@ -17,11 +17,15 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +40,38 @@ public class UrlServiceImpl implements UrlService {
   private final String baseUrl;
   private final int shortCodeLength;
 
+  // Per-hash lock for the dedup check-then-insert in createShortUrl. Closes the
+  // race where two concurrent requests for the same brand-new long URL both miss
+  // the "existing active row" check and each insert their own row - idx_long_url_hash
+  // is a plain index, not a unique constraint, so nothing at the DB level prevents
+  // that duplicate. Single-instance only, same disclosed scope as RateLimiterService
+  // and the Caffeine cache; a multi-instance deployment would need this to move to
+  // a shared lock (e.g. a DB-level unique constraint plus conflict handling, or
+  // Redis). Entries are never evicted - bounded by the number of distinct long URLs
+  // ever submitted for creation, acceptable at prototype scale.
+  //
+  // The lock must be held across the FULL transaction, not just the method body:
+  // Spring's @Transactional proxy commits after the annotated method returns, so if
+  // the synchronized block were nested inside a @Transactional method, the lock
+  // would release (at the end of the method body) a hair before the commit actually
+  // happens - leaving a real, empirically-confirmed window where a second thread
+  // can acquire the lock, query, see nothing committed yet, and insert a duplicate
+  // anyway. createShortUrl below is deliberately NOT @Transactional itself; it holds
+  // the lock and calls createOrReuseTransactional() through the self-injected proxy
+  // (self, not this) so the transactional advice - and its commit - runs, and
+  // completes, entirely inside the synchronized block.
+  private final ConcurrentMap<String, Object> createLocks = new ConcurrentHashMap<>();
+
+  // Self-injected proxy reference so createOrReuseTransactional() goes through
+  // Spring's transactional advice even when called from within this same bean.
+  // Calling this.createOrReuseTransactional(...) directly would bypass the proxy
+  // (classic Spring self-invocation pitfall) and @Transactional would silently do
+  // nothing. @Lazy defers proxy creation so this bean doesn't depend on itself
+  // during construction. Package-private (not private) so unit tests that
+  // construct this class directly with `new` - bypassing Spring entirely - can
+  // set it to `this`, since @Autowired never runs outside a Spring context.
+  @Autowired @Lazy UrlServiceImpl self;
+
   public UrlServiceImpl(
       ShortUrlRepository shortUrlRepository,
       ClickEventRepository clickEventRepository,
@@ -48,17 +84,32 @@ public class UrlServiceImpl implements UrlService {
   }
 
   @Override
-  @Transactional
   public CreateUrlResponse createShortUrl(CreateUrlRequest request) {
     String longUrl = request.getLongUrl().trim();
     String longUrlHash = sha256(longUrl);
 
+    // No custom alias: the dedup check-then-insert below must be serialized per
+    // hash, or two concurrent requests for the same brand-new URL can both miss
+    // the "existing active row" check and each insert their own row.
+    if (request.getCustomAlias() == null) {
+      Object lock = createLocks.computeIfAbsent(longUrlHash, key -> new Object());
+      synchronized (lock) {
+        return self.createOrReuseTransactional(request, longUrl, longUrlHash);
+      }
+    }
+    return self.createOrReuseTransactional(request, longUrl, longUrlHash);
+  }
+
+  @Transactional
+  public CreateUrlResponse createOrReuseTransactional(
+      CreateUrlRequest request, String longUrl, String longUrlHash) {
     // Idempotency: if this exact URL was already shortened (and is still active)
     // and no custom alias is requested, return the existing mapping rather than
     // creating a duplicate row. This keeps the table clean and gives callers a
     // stable code for the same input.
     if (request.getCustomAlias() == null) {
-      var existing = shortUrlRepository.findByLongUrlHashAndActiveTrue(longUrlHash);
+      var existing =
+          shortUrlRepository.findFirstByLongUrlHashAndActiveTrueOrderByCreatedAtAsc(longUrlHash);
       if (existing.isPresent() && !existing.get().isExpired()) {
         return toResponse(existing.get());
       }
